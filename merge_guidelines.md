@@ -1,8 +1,8 @@
 ﻿# Manual Annotation Merger Guidelines
 
-Use `merge_annotations.py` after you have copied a thread's `structured.json` into an external LLM together with your prompt, then saved the LLM result as `output.json`.
+Use `merge_annotations.py` after you have copied a thread's `structured.json` into a LLM together with your prompt, then saved the LLM result as `output.json`.
 
-The script creates `annotation/refined_structured.json` as a copy of `structured.json` with labels appended into matching comments. It does not call an LLM and it does not modify the original `structured.json`.
+The script creates `annotation/refined_structured.json` as a copy of `structured.json` with labels appended into matching comments. It does not call a LLM and it does not modify the original `structured.json`.
 
 ## Required Folder Layout
 
