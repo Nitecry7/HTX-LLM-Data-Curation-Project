@@ -1,0 +1,12 @@
+outputs/
+reddit_threads/
+*.py[cod]
+__pycache__/
+.venv/
+_self_test_outputs/
+
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
