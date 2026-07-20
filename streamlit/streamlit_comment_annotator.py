@@ -16,6 +16,7 @@ import streamlit as st
 EXPECTED_LABEL_KEYS = ("names", "locations", "singlish")
 APP_NAME = "streamlit_comment_annotator"
 REFINED_JSON_NAME = "refined_structured.json"
+REFINED_TXT_NAME = "refined_structured.txt"
 SOURCE_JSON_NAME = "structured.json"
 
 
@@ -33,6 +34,14 @@ class ReviewItem:
     comment: dict[str, Any]
     fallback_ref: str
     ancestors: list[dict[str, Any]]
+
+
+@dataclass
+class ExportThread:
+    index: int
+    entry: ThreadEntry
+    reviewed: int
+    total: int
 
 
 def empty_labels() -> dict[str, list[str]]:
@@ -120,6 +129,97 @@ def review_progress(items: list[ReviewItem]) -> tuple[int, int, float]:
     reviewed = sum(1 for item in items if is_reviewed(item.comment))
     ratio = reviewed / total if total else 0.0
     return reviewed, total, ratio
+
+
+
+def review_counts_for_refined(refined_path: Path) -> tuple[int, int]:
+    try:
+        _data, items = load_review_document(refined_path)
+    except Exception:
+        return 0, 0
+    reviewed, total, _ratio = review_progress(items)
+    return reviewed, total
+
+
+def exportable_threads(entries: list[ThreadEntry]) -> list[ExportThread]:
+    threads: list[ExportThread] = []
+    for index, entry in enumerate(entries):
+        if entry.refined_path is None:
+            continue
+        reviewed, total = review_counts_for_refined(entry.refined_path)
+        threads.append(ExportThread(index=index, entry=entry, reviewed=reviewed, total=total))
+    return threads
+
+
+def export_source_folder_name(input_path_text: str, fallback: str = "reviewed_refined_export") -> str:
+    input_path = Path(input_path_text).expanduser()
+    if input_path.is_file():
+        return nearest_thread_folder(input_path).name
+    if input_path.name:
+        return input_path.name
+    return fallback
+
+
+def choose_export_destination() -> Path | None:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:
+        raise RuntimeError(f"Could not open the folder picker: {exc}") from exc
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        selected = filedialog.askdirectory(title="Choose where to save the reviewed export")
+    finally:
+        root.destroy()
+    if not selected:
+        return None
+    return Path(selected)
+
+
+def validate_export_thread_names(threads: list[ExportThread]) -> None:
+    names: set[str] = set()
+    duplicates: set[str] = set()
+    for thread in threads:
+        name = thread.entry.thread_folder.name
+        if name in names:
+            duplicates.add(name)
+        names.add(name)
+    if duplicates:
+        raise ValueError(f"Duplicate thread folder names cannot be exported: {', '.join(sorted(duplicates))}")
+
+
+def export_refined_threads(
+    threads: list[ExportThread],
+    destination_folder: Path,
+    format_choice: str,
+    export_folder_name: str,
+) -> Path:
+    if not threads:
+        raise ValueError("Select at least one thread to export.")
+
+    validate_export_thread_names(threads)
+    export_root = Path(destination_folder) / export_folder_name
+    if export_root.exists():
+        raise FileExistsError(f"Export folder already exists: {export_root}")
+
+    export_root.mkdir(parents=True)
+    write_json = format_choice in {"JSON", "Both"}
+    write_txt = format_choice in {"TXT", "Both"}
+    for thread in threads:
+        refined_path = thread.entry.refined_path
+        if refined_path is None:
+            continue
+        refined_bytes = Path(refined_path).read_bytes()
+        annotation_dir = export_root / thread.entry.thread_folder.name / "annotation"
+        annotation_dir.mkdir(parents=True, exist_ok=False)
+        if write_json:
+            (annotation_dir / REFINED_JSON_NAME).write_bytes(refined_bytes)
+        if write_txt:
+            (annotation_dir / REFINED_TXT_NAME).write_bytes(refined_bytes)
+    return export_root
 
 
 def label_values_for_highlight(labels: dict[str, list[str]]) -> list[tuple[str, str]]:
@@ -596,7 +696,7 @@ def render_sidebar() -> None:
         value=st.session_state.get("loaded_input_path", ""),
         placeholder=r"outputs\singapore_top_20_20260708_124904",
     )
-    if st.sidebar.button("Load path", use_container_width=True):
+    if st.sidebar.button("Load path", width="stretch"):
         try:
             load_input_path(path_text)
             st.rerun()
@@ -636,7 +736,7 @@ def render_sidebar() -> None:
                 options=list(range(len(current_entry.candidates))),
                 format_func=lambda index: candidate_labels[index],
             )
-            if st.sidebar.button("Use selected refined file", use_container_width=True):
+            if st.sidebar.button("Use selected refined file", width="stretch"):
                 selected_path = current_entry.candidates[candidate_index]
                 current_entry.refined_path = selected_path
                 open_refined_path(selected_path)
@@ -652,6 +752,14 @@ def render_sidebar() -> None:
             st.session_state.get("filter_name", "All")
         ),
     )
+    if st.sidebar.button(
+        "Ship It",
+        icon=":material/ios_share:",
+        disabled=not entries,
+        key="ship_it_open",
+        width="stretch",
+    ):
+        render_ship_it_dialog()
 
 
 def render_thread_progress(items: list[ReviewItem]) -> None:
@@ -675,7 +783,7 @@ def render_navigation(filtered: list[tuple[int, ReviewItem]]) -> tuple[int, Revi
     previous_col, position_col, next_col, save_col = st.columns([1, 2, 1, 1])
 
     with previous_col:
-        if st.button("Previous", use_container_width=True, disabled=current_filtered_index == 0):
+        if st.button("Previous", width="stretch", disabled=current_filtered_index == 0):
             save_current_if_loaded()
             st.session_state.comment_index = filtered_positions[current_filtered_index - 1]
             st.rerun()
@@ -694,13 +802,13 @@ def render_navigation(filtered: list[tuple[int, ReviewItem]]) -> tuple[int, Revi
             st.rerun()
 
     with next_col:
-        if st.button("Next", use_container_width=True, disabled=current_filtered_index >= len(filtered) - 1):
+        if st.button("Next", width="stretch", disabled=current_filtered_index >= len(filtered) - 1):
             save_current_if_loaded()
             st.session_state.comment_index = filtered_positions[current_filtered_index + 1]
             st.rerun()
 
     with save_col:
-        if st.button("Save", use_container_width=True):
+        if st.button("Save", width="stretch"):
             save_current_if_loaded()
             st.rerun()
 
@@ -745,12 +853,118 @@ def render_review_item(item: ReviewItem, index: int, data: dict[str, Any]) -> No
             )
 
 
+
+def reddit_icon_svg() -> str:
+    return """
+    <svg width="38" height="38" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+      <circle cx="32" cy="32" r="29" fill="#ff4500"/>
+      <circle cx="23" cy="34" r="5" fill="#ffffff"/>
+      <circle cx="41" cy="34" r="5" fill="#ffffff"/>
+      <circle cx="23" cy="34" r="2" fill="#ff4500"/>
+      <circle cx="41" cy="34" r="2" fill="#ff4500"/>
+      <path d="M23 45c5 4 13 4 18 0" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+      <path d="M32 20l6-11 12 3" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="53" cy="13" r="5" fill="#ffffff"/>
+      <path d="M14 29c4-7 12-10 18-10s14 3 18 10" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+    </svg>
+    """.strip()
+
+
+def render_app_title() -> None:
+    st.markdown(
+        f"""
+        <div style="display:flex; align-items:center; gap:0.7rem; margin:1.25rem 0 1rem 0;">
+          {reddit_icon_svg()}
+          <h1 style="margin:0; padding:0; font-size:2.5rem; line-height:1.2; font-weight:700;">
+            Reddit Comment Label Reviewer
+          </h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def export_thread_label(thread: ExportThread) -> str:
+    status = f"{thread.reviewed}/{thread.total} reviewed" if thread.total else "review status unavailable"
+    if thread.total and thread.reviewed < thread.total:
+        status = f"incomplete - {status}"
+    return f"{thread.entry.thread_folder.name} ({status})"
+
+
+@st.dialog("Ship It", width="large", icon=":material/ios_share:")
+def render_ship_it_dialog() -> None:
+    threads = exportable_threads(st.session_state.get("thread_entries", []))
+    if not threads:
+        st.warning("Load a path with at least one refined_structured.json file before exporting.")
+        return
+
+    export_folder_name = export_source_folder_name(st.session_state.get("loaded_input_path", ""))
+    st.caption(f"Export folder: {export_folder_name}")
+
+    select_all = st.toggle("Select all threads", value=True, key="ship_it_select_all")
+    thread_by_index = {thread.index: thread for thread in threads}
+    if select_all:
+        selected_thread_indices = [thread.index for thread in threads]
+    else:
+        selected_thread_indices = st.multiselect(
+            "Threads",
+            options=[thread.index for thread in threads],
+            default=[thread.index for thread in threads],
+            format_func=lambda index: export_thread_label(thread_by_index[index]),
+            placeholder="Choose one or more threads",
+            key="ship_it_thread_indices",
+        )
+
+    format_choice = st.segmented_control(
+        "Format",
+        ["JSON", "TXT", "Both"],
+        default="JSON",
+        key="ship_it_format",
+        width="stretch",
+    )
+    selected_threads = [thread_by_index[index] for index in selected_thread_indices]
+    incomplete = [thread for thread in selected_threads if thread.total and thread.reviewed < thread.total]
+    if incomplete:
+        st.warning(f"{len(incomplete)} selected thread(s) are not fully reviewed. You can still export them.")
+
+    st.caption(f"{len(selected_threads)} thread(s) selected")
+    if st.button(
+        "Choose destination and export",
+        type="primary",
+        icon=":material/folder_open:",
+        disabled=not selected_threads or format_choice is None,
+        width="stretch",
+    ):
+        save_current_if_loaded()
+        try:
+            destination = choose_export_destination()
+            if destination is None:
+                st.info("Export cancelled. No destination folder was selected.")
+                return
+            export_root = export_refined_threads(selected_threads, destination, str(format_choice), export_folder_name)
+        except FileExistsError as exc:
+            st.warning(str(exc))
+            return
+        except Exception as exc:
+            st.error(f"Export failed: {exc}")
+            return
+
+        set_notice(
+            "success",
+            f"Exported {len(selected_threads)} thread(s)",
+            f"Folder: {export_root}",
+            toast="Ship It export complete",
+        )
+        st.rerun()
+
+
+
 def run_app() -> None:
     st.set_page_config(page_title="Reddit Comment Reviewer", layout="wide")
     initialize_session_defaults()
     render_sidebar()
 
-    st.title("Reddit Comment Label Reviewer")
+    render_app_title()
     render_notice()
 
     data = st.session_state.get("data")
@@ -853,6 +1067,39 @@ def _self_test() -> None:
         save_json_atomic(sample, refined)
         assert refined.exists()
         assert backup_path_for(refined).exists()
+
+        export_threads = exportable_threads(discover_thread_entries(root))
+        assert len(export_threads) == 2
+        selected_refined_thread = next(thread for thread in export_threads if thread.entry.refined_path == refined)
+        selected_direct_thread = next(thread for thread in export_threads if thread.entry.refined_path == direct_refined)
+        assert selected_refined_thread.reviewed == 0
+        assert selected_refined_thread.total == 2
+        assert export_source_folder_name(str(root)) == root.name
+        assert export_source_folder_name(str(refined)) == thread_one.name
+
+        export_dest = root / "ship_dest"
+        export_dest.mkdir()
+        json_export = export_refined_threads([selected_refined_thread], export_dest, "JSON", root.name)
+        json_output = json_export / thread_one.name / "annotation" / REFINED_JSON_NAME
+        txt_output = json_export / thread_one.name / "annotation" / REFINED_TXT_NAME
+        assert json_output.read_bytes() == refined.read_bytes()
+        assert not txt_output.exists()
+
+        try:
+            export_refined_threads([selected_refined_thread], export_dest, "JSON", root.name)
+            raise AssertionError("Existing export folder should stop export")
+        except FileExistsError:
+            pass
+
+        txt_export = export_refined_threads([selected_refined_thread], export_dest, "TXT", root.name + "_txt")
+        txt_only_output = txt_export / thread_one.name / "annotation" / REFINED_TXT_NAME
+        assert txt_only_output.read_bytes() == refined.read_bytes()
+        assert not (txt_export / thread_one.name / "annotation" / REFINED_JSON_NAME).exists()
+
+        both_export = export_refined_threads([selected_direct_thread], export_dest, "Both", root.name + "_both")
+        both_annotation = both_export / thread_two.name / "annotation"
+        assert (both_annotation / REFINED_JSON_NAME).read_bytes() == direct_refined.read_bytes()
+        assert (both_annotation / REFINED_TXT_NAME).read_bytes() == direct_refined.read_bytes()
     finally:
         shutil.rmtree(root, ignore_errors=True)
         if temp_root.exists() and not any(temp_root.iterdir()):
