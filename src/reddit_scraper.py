@@ -21,6 +21,30 @@ PLAYWRIGHT_USER_AGENT = (
 )
 MAX_FOLDER_NAME_LENGTH = 90
 REDDIT_BASE_URL = "https://www.reddit.com"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_PRESET_PATH = PROJECT_ROOT / "config" / "reddit_scraper_defaults.json"
+DEFAULT_PRESET = {
+    "sort": "top",
+    "min_delay": 5.0,
+    "max_delay": 10.0,
+    "cooldown_every_n_posts": 5,
+    "cooldown_min": 15.0,
+    "cooldown_max": 20.0,
+    "max_retries": 4,
+    "retry_base_delay": 10.0,
+    "resume": True,
+}
+PRESET_FIELDS = {
+    "sort": str,
+    "min_delay": float,
+    "max_delay": float,
+    "cooldown_every_n_posts": int,
+    "cooldown_min": float,
+    "cooldown_max": float,
+    "max_retries": int,
+    "retry_base_delay": float,
+    "resume": bool,
+}
 
 
 @dataclass
@@ -1162,10 +1186,10 @@ def run_self_test():
     assert sample["comments"][0]["replies"][0]["replying_to"] == "C001 u/commenter_one"
     assert sample["comments"][0]["replies"][0]["author"] == DELETED_AUTHOR
     assert sample["unresolved_more_comments"] == 1
-    temp_dir = Path("_self_test_outputs")
+    temp_dir = Path("_self_test_outputs") / f"reddit_scraper_{os.getpid()}"
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
-    temp_dir.mkdir(exist_ok=True)
+    temp_dir.mkdir(parents=True, exist_ok=True)
     fixture_path = temp_dir / "thread_fixture.json"
     fixture_path.write_text(json.dumps(fixture_thread_json(), ensure_ascii=False), encoding="utf-8")
     thread_run_dir = scrape_thread_json_file(fixture_path, temp_dir / "runs")
@@ -1188,28 +1212,197 @@ def run_self_test():
     assert raw_thread[0]["data"]["children"][0]["data"]["title"] == sample["title"]
     assert "example_user" not in pii_text
     assert "https://reddit.com" not in pii_text
+    default_args = parse_args(["singapore", "20", "--default"])
+    apply_default_preset(default_args)
+    apply_cli_defaults(default_args)
+    assert default_args.sort == "top"
+    assert default_args.min_delay == 5.0
+    assert default_args.max_delay == 10.0
+    assert default_args.cooldown_every_n_posts == 5
+    assert default_args.cooldown_min == 15.0
+    assert default_args.cooldown_max == 20.0
+    assert default_args.max_retries == 4
+    assert default_args.retry_base_delay == 10.0
+    assert default_args.resume is True
+
+    override_args = parse_args(["singapore", "20", "--default", "--sort", "hot", "--max-retries", "1", "--no-resume"])
+    apply_default_preset(override_args)
+    apply_cli_defaults(override_args)
+    assert override_args.sort == "hot"
+    assert override_args.max_retries == 1
+    assert override_args.resume is False
+    assert override_args.min_delay == 5.0
+
+    invalid_preset = DEFAULT_PRESET.copy()
+    invalid_preset["cooldown_max"] = 1.0
+    invalid_preset["cooldown_min"] = 2.0
+    try:
+        validate_preset_values(invalid_preset)
+        raise AssertionError("invalid preset should fail validation")
+    except ValueError:
+        pass
+
     print("Self-test passed")
+
+
+def coerce_bool(value, field_name):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "y", "1", "on"}:
+            return True
+        if normalized in {"false", "no", "n", "0", "off"}:
+            return False
+    raise ValueError(f"{field_name} must be true or false")
+
+
+def coerce_preset_value(field_name, value):
+    expected_type = PRESET_FIELDS[field_name]
+    if expected_type is bool:
+        return coerce_bool(value, field_name)
+    try:
+        if expected_type is int:
+            if isinstance(value, bool):
+                raise ValueError
+            return int(value)
+        if expected_type is float:
+            if isinstance(value, bool):
+                raise ValueError
+            return float(value)
+        return str(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must be a {expected_type.__name__}") from None
+
+
+def validate_preset_values(preset):
+    if preset["sort"] not in {"hot", "new", "top", "rising"}:
+        raise ValueError("sort must be one of: hot, new, top, rising")
+    if preset["min_delay"] < 0 or preset["max_delay"] < 0:
+        raise ValueError("delay values must be 0 or greater")
+    if preset["max_delay"] < preset["min_delay"]:
+        raise ValueError("max_delay must be greater than or equal to min_delay")
+    if preset["cooldown_every_n_posts"] < 0:
+        raise ValueError("cooldown_every_n_posts must be 0 or greater")
+    if preset["cooldown_min"] < 0 or preset["cooldown_max"] < 0:
+        raise ValueError("cooldown values must be 0 or greater")
+    if preset["cooldown_max"] < preset["cooldown_min"]:
+        raise ValueError("cooldown_max must be greater than or equal to cooldown_min")
+    if preset["max_retries"] < 0:
+        raise ValueError("max_retries must be 0 or greater")
+    if preset["retry_base_delay"] < 0:
+        raise ValueError("retry_base_delay must be 0 or greater")
+    return preset
+
+
+def normalize_preset(raw_preset):
+    unknown_fields = sorted(set(raw_preset) - set(PRESET_FIELDS))
+    if unknown_fields:
+        joined = ", ".join(unknown_fields)
+        raise ValueError(f"Unknown default preset field(s): {joined}")
+    preset = DEFAULT_PRESET.copy()
+    for field_name, value in raw_preset.items():
+        preset[field_name] = coerce_preset_value(field_name, value)
+    return validate_preset_values(preset)
+
+
+def load_default_preset(path=DEFAULT_PRESET_PATH):
+    if not path.exists():
+        return DEFAULT_PRESET.copy()
+    try:
+        raw_preset = json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Could not parse {path}: {exc}") from exc
+    if not isinstance(raw_preset, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return normalize_preset(raw_preset)
+
+
+def save_default_preset(preset, path=DEFAULT_PRESET_PATH):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(validate_preset_values(preset), indent=2) + "\n", encoding="utf-8")
+
+
+def apply_default_preset(args):
+    if not args.default:
+        return args
+    preset = load_default_preset()
+    for field_name, value in preset.items():
+        if getattr(args, field_name) is None:
+            setattr(args, field_name, value)
+    return args
+
+
+def apply_cli_defaults(args):
+    if args.sort is None:
+        args.sort = "hot"
+    if args.cooldown_every_n_posts is None:
+        args.cooldown_every_n_posts = 0
+    if args.cooldown_min is None:
+        args.cooldown_min = 0.0
+    if args.cooldown_max is None:
+        args.cooldown_max = 0.0
+    if args.max_retries is None:
+        args.max_retries = 0
+    if args.retry_base_delay is None:
+        args.retry_base_delay = 5.0
+    if args.resume is None:
+        args.resume = True
+    return args
+
+
+def prompt_for_preset_value(field_name, current_value):
+    value = input(f"{field_name} [{current_value}]: ").strip()
+    if not value:
+        return current_value
+    return coerce_preset_value(field_name, value)
+
+
+def configure_default_preset(path=DEFAULT_PRESET_PATH):
+    preset = load_default_preset(path)
+    print(f"Editing Reddit scraper defaults at {path}")
+    print("Press Enter to keep the current value.")
+    while True:
+        candidate = preset.copy()
+        for field_name in PRESET_FIELDS:
+            while True:
+                try:
+                    candidate[field_name] = prompt_for_preset_value(field_name, candidate[field_name])
+                    break
+                except ValueError as exc:
+                    print(f"Invalid value: {exc}")
+        try:
+            preset = validate_preset_values(candidate)
+            break
+        except ValueError as exc:
+            print(f"The default set is invalid: {exc}")
+            print("Please enter the values again.")
+    save_default_preset(preset, path)
+    print(f"Saved defaults to {path}")
+    return path
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Scrape Reddit threads into readable, structured, and PII-input files.")
     parser.add_argument("subreddit", nargs="?", help="Subreddit name, for example singapore or askSingapore")
     parser.add_argument("threads", nargs="?", type=int, help="Number of threads to scrape")
-    parser.add_argument("--sort", default="hot", choices=["hot", "new", "top", "rising"], help="Subreddit sort type")
+    parser.add_argument("--sort", choices=["hot", "new", "top", "rising"], help="Subreddit sort type")
     parser.add_argument("--url", action="append", default=[], help="Direct Reddit thread URL. Repeat for multiple URLs.")
     parser.add_argument("--listing-json-file", help="Browser-saved Reddit listing JSON file, for example hot.json")
     parser.add_argument("--thread-json-file", help="Browser-saved Reddit thread JSON file with post and comments")
     parser.add_argument("--delay", type=float, default=1.0, help="Compatibility option: fixed seconds to wait between thread requests")
     parser.add_argument("--min-delay", type=float, help="Minimum random delay between live thread requests")
     parser.add_argument("--max-delay", type=float, help="Maximum random delay between live thread requests")
-    parser.add_argument("--cooldown-every-n-posts", type=int, default=0, help="Take a longer cooldown after every N fetched posts; 0 disables cooldown")
-    parser.add_argument("--cooldown-min", type=float, default=0.0, help="Minimum cooldown seconds")
-    parser.add_argument("--cooldown-max", type=float, default=0.0, help="Maximum cooldown seconds")
-    parser.add_argument("--max-retries", type=int, default=0, help="Retry count after the first failed attempt for temporary fetch failures")
-    parser.add_argument("--retry-base-delay", type=float, default=5.0, help="Base seconds for exponential retry backoff")
+    parser.add_argument("--cooldown-every-n-posts", type=int, help="Take a longer cooldown after every N fetched posts; 0 disables cooldown")
+    parser.add_argument("--cooldown-min", type=float, help="Minimum cooldown seconds")
+    parser.add_argument("--cooldown-max", type=float, help="Maximum cooldown seconds")
+    parser.add_argument("--max-retries", type=int, help="Retry count after the first failed attempt for temporary fetch failures")
+    parser.add_argument("--retry-base-delay", type=float, help="Base seconds for exponential retry backoff")
     parser.add_argument("--resume", dest="resume", action="store_true", help="Use outputs/scrape_state.json to skip posts already collected")
     parser.add_argument("--no-resume", dest="resume", action="store_false", help="Do not read or update resume state")
-    parser.set_defaults(resume=True)
+    parser.set_defaults(resume=None)
+    parser.add_argument("--default", action="store_true", help="Load saved reliable scraping defaults from config/reddit_scraper_defaults.json")
+    parser.add_argument("--configure-defaults", action="store_true", help="Interactively edit config/reddit_scraper_defaults.json")
     parser.add_argument("--fetcher", default="playwright", choices=["playwright", "requests"], help="Live Reddit JSON fetch backend")
     parser.add_argument("--headed", action="store_true", help="Show Chromium when using the Playwright fetcher")
     parser.add_argument("--output-root", default="outputs", help="Directory where scrape outputs will be created")
@@ -1250,10 +1443,19 @@ def build_scrape_options(args):
 
 def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
+    if args.configure_defaults:
+        try:
+            configure_default_preset()
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        return 0
     if args.self_test:
         run_self_test()
         return 0
     try:
+        apply_default_preset(args)
+        apply_cli_defaults(args)
         options = build_scrape_options(args)
         if args.thread_json_file:
             output_dir = scrape_thread_json_file(args.thread_json_file, Path(args.output_root))
@@ -1278,22 +1480,5 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
