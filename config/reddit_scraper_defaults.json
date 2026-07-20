@@ -1,0 +1,11 @@
+﻿{
+  "sort": "top",
+  "min_delay": 5.0,
+  "max_delay": 10.0,
+  "cooldown_every_n_posts": 5,
+  "cooldown_min": 15.0,
+  "cooldown_max": 20.0,
+  "max_retries": 4,
+  "retry_base_delay": 10.0,
+  "resume": true
+}
