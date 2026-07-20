@@ -1,9 +1,9 @@
-﻿## Objective
+﻿# Objective
 
 This project aims to build a high quality, manually verified dataset of Singapore Reddit discussions to support research on Singapore specific language understanding. It consists of a Reddit scraper, a structured data pipeline, and an annotation workflow that identifies named entities, Singapore locations, and Singlish expressions. The dataset is intended to serve as a reliable benchmark for evaluating and improving large language models on Singaporean online discourse, with AI generated annotations used only as a first draft before human verification.
 
 
-# Reddit Scraper
+## Reddit Scraper
 
 Python CLI scraper for collecting public Reddit threads into human-readable and downstream PII-detection-friendly files.
 
