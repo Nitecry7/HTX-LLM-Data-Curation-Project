@@ -4,7 +4,7 @@ Python CLI scraper for collecting public Reddit threads into human-readable and 
 
 This version does not require Reddit developer credentials. Live scraping uses Playwright by default to warm up a browser context and fetch Reddit `.json` endpoints through that context. The older `requests` backend is still available with `--fetcher requests`.
 
-The current data-collection focus is `r/singapore`. The scraper saves `structured.json` with empty label arrays, and the separate `annotate.py` helper can later fill those arrays with draft LLM labels for manual review.
+The current data-collection focus is `r/singapore`. The scraper saves `structured.json` with empty label arrays, and the separate `annotate.py` helper can later fill those arrays with draft LLM labels for manual review (Note: annotate.py is not being utilized in the current workflow).
 
 ## Setup
 
@@ -201,7 +201,7 @@ comment_ref, comment_id, parent_id, author, level, replying_to, body,
 permalink, score, created_utc, labels, replies
 ```
 
-`labels` is always present but empty for Task 1:
+`labels` is always present but empty:
 
 ```json
 {"names": [], "locations": [], "singlish": []}
@@ -384,6 +384,8 @@ outputs\singapore_top_20_20260708_124904
 For parent folders, the reviewer recursively finds `refined_structured.json` files anywhere inside each thread folder, including both direct files and files under `annotation/`. The app shows each thread separately, flattens nested comments for one-by-one review, shows the post and reply chain as collapsible context, and saves the previous comment before moving to the next one.
 
 The label editor has one compact text box each for `names`, `locations`, and `singlish`. Use one label per line; comma-separated labels are also accepted. The first save creates a one-time `.bak` backup beside the refined JSON, then later saves use atomic replacement.
+
+Use **Ship It** in the left Reviewer pane below the filters to export selected reviewed `refined_structured` files into a clean handoff folder. Ship It can export `.json`, `.txt`, or both formats while preserving each thread folder and `annotation/` layout. See [export_guidelines.md](export_guidelines.md) for the full export steps, destination-folder rules, and output examples.
 
 ## Offline Check
 
