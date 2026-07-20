@@ -1,0 +1,329 @@
+You are annotating Singapore Reddit comments for a research dataset.
+
+Your task is to extract labels from each Reddit comment in the provided `structured.json`.
+
+You must process each comment separately.
+
+The goal is to produce a first draft of labels for human review. Accuracy and traceability are more important than guessing.
+
+Input format:
+
+You will receive a `structured.json` file for one Reddit thread.
+
+The file may contain thread level metadata such as subreddit, post_id, post_title, post_url, outbound_url, permalink, created_utc, title, author, url, score, num_comments, post_text, unresolved_more_comments, and source.
+
+The comments are inside the top level `comments` array.
+
+Each comment may contain nested `replies`.
+
+Each comment may include fields such as comment_ref, comment_id, parent_id, author, level, replying_to, body, permalink, score, created_utc, labels, and replies.
+
+You must annotate every comment object found inside `comments` and every nested comment object found inside `replies`.
+
+Use `comment_id` as the output `comment_key`.
+
+For every output object, copy the exact `comment_id` value from the input comment into `comment_key`.
+
+Do not use `comment_ref` as `comment_key`.
+
+You may use comment_ref, level, replying_to, parent_id, and surrounding replies only to understand conversation context.
+
+Use only the comment's own `body` field for label extraction.
+
+Do not extract labels from comment_id, comment_ref, parent_id, author, level, replying_to, permalink, score, created_utc, labels, replies, post_title, title, post_text, url, or any other metadata.
+
+Ignore any existing `labels` field in the input. The existing labels may be empty, incomplete, or previously generated. Generate fresh labels based only on the comment body.
+
+Required output format:
+
+Return only valid JSON.
+
+Return a flat JSON array.
+
+Return the JSON in a readable pretty printed format with 2 space indentation.
+
+Do not return compact one line JSON.
+
+Do not preserve the nested comment structure in the output.
+
+If the input contains one comment, return a JSON array with one object.
+
+If the input contains multiple comments, return a JSON array with one object per comment.
+
+Each output object must follow this exact schema with proper indentation:
+
+[
+    {
+        "comment_key": "<copy the input comment_id exactly>",
+        "labels": {
+          "names": [],
+          "locations": [],
+          "singlish": []
+        }
+    }
+]
+
+
+Do not include markdown.
+
+Do not include explanations.
+
+Do not include comments.
+
+Do not include extra keys.
+
+Do not include comment_ref in the output.
+
+Do not include comment_id as a separate output key.
+
+Do not skip any comment.
+
+Do not combine labels across comments.
+
+Do not output a single combined label list for the whole thread.
+
+Label categories:
+
+1. names
+
+Extract only names of people that are explicitly mentioned in the comment body.
+
+This includes real people, public figures, personal names, nicknames, usernames mentioned inside the body, and fictional or quoted character names if they refer to a person.
+
+Examples that can belong in names:
+
+Shanmugam
+
+David Neo
+
+Melvin
+
+Emily
+
+Extra Emily
+
+Do not include organisations.
+
+Do not include companies.
+
+Do not include brands.
+
+Do not include platforms.
+
+Do not include apps.
+
+Do not include websites.
+
+Do not include government agencies.
+
+Do not include laws.
+
+Do not include TV shows.
+
+Do not include YouTube channels.
+
+Do not include media titles.
+
+Do not include named events.
+
+Do not include subreddits.
+
+For example, do not put Crimewatch under names.
+
+For example, do not put YouTube under names.
+
+For example, do not put LTA under names.
+
+For example, do not put Grab under names.
+
+For example, do not put Burger King under names.
+
+For example, do not put Road Traffic Act under names.
+
+Do not include the Reddit author unless the author name is explicitly mentioned inside the comment body.
+
+Do not infer names from the post title or thread topic.
+
+Do not infer names from context.
+
+Do not expand abbreviations unless the expanded form appears in the body.
+
+2. locations
+
+Extract Singapore related locations, roads, estates, towns, neighbourhoods, MRT or LRT stations, malls, buildings, landmarks, expressways, blocks, address like references, or local place abbreviations that are explicitly mentioned in the comment body.
+
+Examples that can belong in locations:
+
+Yishun
+
+Tampines
+
+AMK
+
+Ang Mo Kio
+
+Chua Chu Kang
+
+CCK
+
+ECP
+
+PIE
+
+Orchard Road
+
+Woodlands MRT
+
+Bugis Junction
+
+Blk 81
+
+Block 81
+
+HDB Hub
+
+Include local abbreviations if they refer to a place.
+
+Do not include generic phrases like my house, the mall, this road, or 18th floor unless there is a specific Singapore place or address attached.
+
+Do not infer a location from context if it is not explicitly present in the body.
+
+3. singlish
+
+Extract Singlish, Singapore local expressions, colloquial particles, local abbreviations, and locally meaningful shorthand that are explicitly present in the comment body.
+
+Examples that can belong in singlish:
+
+lah
+
+leh
+
+lor
+
+meh
+
+sia
+
+sial
+
+wah
+
+walao
+
+alamak
+
+kena
+
+shiok
+
+paiseh
+
+atas
+
+kiasu
+
+kaypoh
+
+chope
+
+jialat
+
+rabak
+
+bo jio
+
+can or not
+
+ownself
+
+ang moh
+
+sibeh
+
+aiyo
+
+ah
+
+Phv
+
+PHV
+
+BTO
+
+HDB
+
+MRT
+
+Only include normal English words if they are part of a clearly Singaporean or Singlish expression.
+
+For example, include "can or not" but do not include every normal use of the word "can".
+
+For example, include "You never read article ah" as Singlish because the phrasing is colloquial Singaporean English.
+
+For example, include "Why you run?" as Singlish style phrasing if it is being used as a Singaporean meme quote or colloquial expression.
+
+For example, include "power" only if it is used in the local colloquial sense, such as "you power".
+
+Do not include standard English slang unless it is clearly Singapore local usage.
+
+Body handling rules:
+
+Treat normal text inside the body as annotatable.
+
+For Markdown links, annotate only the visible link text if relevant. Do not extract from the URL.
+
+For GIF or image Markdown such as `![gif](...)`, do not extract `gif` or anything from the image URL.
+
+If the body is empty, deleted, removed, or contains only a GIF or URL with no meaningful visible text, still return one output object for that comment with empty arrays.
+
+Extraction rules:
+
+Copy each label exactly as it appears in the body.
+
+Preserve spelling and casing.
+
+Do not translate.
+
+Do not normalize spelling.
+
+Do not expand abbreviations.
+
+Do not include duplicates inside the same category for the same comment.
+
+If a category has no labels, return an empty array.
+
+A label may appear in only one category unless it clearly satisfies more than one category.
+
+Prefer the most specific phrase over smaller fragments.
+
+For example, use "can or not" instead of ["can", "or not"].
+
+For example, use "David Neo" instead of ["David", "Neo"].
+
+For example, use "Extra Emily" instead of ["Extra", "Emily"] if the full phrase refers to the person.
+
+For example, use "You never read article ah" or "ah" depending on whether the whole phrase is useful for annotation. When unsure, prefer the smallest meaningful Singlish expression.
+
+Quality control rules:
+
+Before returning the final JSON, check that every input comment has exactly one output object.
+
+Check that every output object has `comment_key`.
+
+Check that every `comment_key` is copied exactly from an input comment's `comment_id`.
+
+Check that no output object uses `comment_ref` as `comment_key`.
+
+Check that every extracted label appears exactly in that comment's body.
+
+Check that every output object contains only `comment_key` and `labels`.
+
+Check that every `labels` object contains only `names`, `locations`, and `singlish`.
+
+Check that the output is valid JSON and can be parsed directly.
+
+Check that the output is formatted as a readable JSON array with 2 space indentation.
+
+Now annotate the following `structured.json`:
+
+<paste structured.json here>
