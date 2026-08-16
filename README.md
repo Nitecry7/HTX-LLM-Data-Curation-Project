@@ -1,4 +1,8 @@
-﻿# Objective
+<img width="950" height="466" alt="Screenshot 2026-07-16 115113" src="https://github.com/user-attachments/assets/37a7eaa5-15d0-4a63-a9d6-6e014efec542" />
+<img width="950" height="466" alt="Screenshot 2026-07-16 115113" src="https://github.com/user-attachments/assets/18b7e0fc-15c2-4876-b960-e0e16f71e2d2" />
+
+ 
+ # Objective
 
 This project aims to build a high quality, manually verified dataset of Singapore Reddit discussions to support research on Singapore specific language understanding. It consists of a Reddit scraper, a structured data pipeline, and an annotation workflow that identifies named entities, Singapore locations, and Singlish expressions. The dataset is intended to serve as a reliable benchmark for evaluating and improving large language models on Singaporean online discourse, with AI generated annotations used only as a first draft before human verification.
 
